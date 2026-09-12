@@ -109,6 +109,22 @@ h3 { margin: 15px 0 5px 0; }
   height: 120px;
 }
 .hint { font-size: 13px; color: #e0e0e0; }
+#wildBar { margin: 6px 0; }
+#wildPick, #customPick { padding: 6px; margin: 2px; }
+.wild {
+  width: 70px;
+  height: 96px;
+  background: #fff;
+  color: #111;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  font-weight: bold;
+  margin: auto;
+  cursor: grab;
+}
 </style>
 </head>
 <body>
@@ -142,6 +158,14 @@ h3 { margin: 15px 0 5px 0; }
 
   <h3>Unplaced cards (<span id="poolCount">52</span>)</h3>
   <div id="pool"></div>
+
+  <h3>Wildcards (unlimited)</h3>
+  <div id="wildBar">
+    <select id="wildPick"></select>
+    <button onclick="addWild()">Add wildcard</button>
+    <input id="customPick" placeholder="Type here" maxlength="8">
+    <button onclick="addCustom()">Add custom</button>
+  </div>
 </div>
 
 <script>
@@ -166,6 +190,48 @@ function makeDeck() {
   return d;
 }
 
+function isWild(code) {
+  return code.indexOf("*") >= 0 || code.charAt(0) === "{";
+}
+function wildCodes() {
+  var w = [];
+  for (var i = 0; i < ranks.length; i++) w.push(ranks[i] + "*");
+  for (var j = 0; j < suits.length; j++) w.push("*" + suits[j]);
+  return w;
+}
+function validCode(code) {
+  var full = makeDeck();
+  for (var k = 0; k < full.length; k++) if (full[k].code === code) return true;
+  if (code === "**") return true;
+  if (/^\{[A-Z0-9]{1,8}\}$/.test(code)) return true;
+  return wildCodes().indexOf(code) >= 0;
+}
+function fillWildPick() {
+  var sel = document.getElementById("wildPick");
+  var w = wildCodes();
+  for (var i = 0; i < w.length; i++) {
+    var op = document.createElement("option");
+    op.value = w[i];
+    op.text = w[i];
+    sel.appendChild(op);
+  }
+}
+function addWild() {
+  var sel = document.getElementById("wildPick");
+  pool.push({ code: sel.value, locked: false });
+  saveHistory();
+  drawAll();
+}
+function addCustom() {
+  var inp = document.getElementById("customPick");
+  var t = inp.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 8);
+  if (!t) { alert("Type 1-8 letters or numbers first"); return; }
+  if (validCode(t)) { alert(t + " is already a card, pick another name"); return; }
+  pool.push({ code: "{" + t + "}", locked: false });
+  inp.value = "";
+  saveHistory();
+  drawAll();
+}
 function imgUrl(code) {
   var rank = code.slice(0, -1);
   var suit = code.slice(-1);
@@ -174,6 +240,7 @@ function imgUrl(code) {
 }
 
 pool = makeDeck();
+fillWildPick();
 saveHistory();
 drawAll();
 
@@ -191,9 +258,17 @@ function cardHtml(card, fromBoard, index) {
   if (selected && selected.fromBoard === fromBoard && selected.index === index) sel = " selected";
   var lock = card.locked ? " locked" : "";
   var lockIcon = card.locked ? "🔒" : "🔓";
-  return '<div class="card-wrap' + sel + lock + '">' +
-    '<img src="' + imgUrl(card.code) + '" draggable="' + (!card.locked) + '" ' +
-    'data-board="' + (fromBoard ? 1 : 0) + '" data-index="' + index + '" title="' + card.code + '">' +
+  var pic = "";
+  if (isWild(card.code)) {
+    var label = card.code.charAt(0) === "{" ? card.code.slice(1, -1) : card.code;
+    var fs = label.length > 3 ? ' style="font-size:14px"' : "";
+    pic = '<div class="wild"' + fs + ' draggable="' + (!card.locked) + '" ' +
+      'data-board="' + (fromBoard ? 1 : 0) + '" data-index="' + index + '" title="' + card.code + '">' + label + '</div>';
+  } else {
+    pic = '<img src="' + imgUrl(card.code) + '" draggable="' + (!card.locked) + '" ' +
+      'data-board="' + (fromBoard ? 1 : 0) + '" data-index="' + index + '" title="' + card.code + '">';
+  }
+  return '<div class="card-wrap' + sel + lock + '">' + pic +
     '<button class="lock-btn" data-lock-board="' + (fromBoard ? 1 : 0) + '" data-lock-index="' + index + '">' + lockIcon + '</button>' +
     '</div>';
 }
@@ -240,7 +315,7 @@ function drawBoard() {
         dropCard(code, true, slotIndex);
       };
       slot.onclick = function(e) {
-        if (e.target.tagName === "IMG" || e.target.tagName === "BUTTON") return;
+        if (e.target.closest(".card-wrap")) return;
         if (selected) {
           moveSelected(true, parseInt(slot.getAttribute("data-slot")));
         }
@@ -250,7 +325,7 @@ function drawBoard() {
 }
 
 function addCardEvents(root, isBoard) {
-  var imgs = root.querySelectorAll("img");
+  var imgs = root.querySelectorAll("img, .wild");
   for (var i = 0; i < imgs.length; i++) {
     (function(img) {
       img.ondragstart = function(e) {
@@ -478,14 +553,29 @@ function parseAnswer(str) {
   var out = [];
   var i = 0;
   while (i < str.length) {
-    if (str.substr(i, 2) === "10" && i + 2 < str.length && "SHDC".indexOf(str[i + 2]) >= 0) {
+    if (str[i] === "{") {
+      var end = str.indexOf("}", i);
+      var tok = end < 0 ? "" : str.slice(i, end + 1);
+      if (!/^\{[A-Z0-9]{1,8}\}$/.test(tok)) throw "bad custom card in '" + str.slice(i) + "'";
+      out.push(tok);
+      i = end + 1;
+    } else if (str[i] === "*") {
+      var nx = str[i + 1];
+      if (nx && "SHDC*".indexOf(nx) >= 0) {
+        out.push("*" + nx);
+        i += 2;
+      } else {
+        out.push("**");
+        i += 1;
+      }
+    } else if (str.substr(i, 2) === "10" && i + 2 < str.length && "SHDC*".indexOf(str[i + 2]) >= 0) {
       out.push("10" + str[i + 2]);
       i += 3;
     } else {
       var rank = str[i];
       var suit = str[i + 1];
       if (!suit) throw "stuck at '" + str.slice(i) + "'";
-      if ("SHDC".indexOf(suit) < 0) throw "bad suit in '" + str.slice(i) + "'";
+      if ("SHDC*".indexOf(suit) < 0) throw "bad suit in '" + str.slice(i) + "'";
       if (rank === "0") rank = "10";
       if (rank === "1") rank = "A";
       if ("A23456789JQK".indexOf(rank) < 0 && rank !== "10") throw "bad rank in '" + str.slice(i) + "'";
@@ -498,16 +588,14 @@ function parseAnswer(str) {
 function applyAnswerCodes(codes) {
   var seen = {};
   for (var k = 0; k < codes.length; k++) {
-    if (seen[codes[k]]) { alert("Duplicate card " + codes[k]); return; }
-    seen[codes[k]] = true;
+    if (!validCode(codes[k])) { alert("Unknown card " + codes[k]); return; }
+    if (!isWild(codes[k])) {
+      if (seen[codes[k]]) { alert("Duplicate card " + codes[k]); return; }
+      seen[codes[k]] = true;
+    }
   }
   if (codes.length > 52) { alert("Too many cards (max 52)"); return; }
   var full = makeDeck();
-  var byCode = {};
-  for (var f = 0; f < full.length; f++) byCode[full[f].code] = true;
-  for (var c = 0; c < codes.length; c++) {
-    if (!byCode[codes[c]]) { alert("Unknown card " + codes[c]); return; }
-  }
   board = [];
   for (var i = 0; i < 52; i++) board.push(null);
   for (var j = 0; j < codes.length; j++) board[j] = { code: codes[j], locked: false };
@@ -527,9 +615,17 @@ function doImport() {
   if (txt.charAt(0) === "{") {
     try {
       var o = JSON.parse(txt);
-      var count = o.p.length;
-      for (var i = 0; i < o.b.length; i++) if (o.b[i]) count++;
-      if (o.b.length !== 52 || count !== 52) { alert("That doesn't look like 52 cards"); return; }
+      if (!o.b || !o.p || o.b.length !== 52) { alert("Bad board"); return; }
+      var seen2 = {};
+      var all = o.b.concat(o.p);
+      for (var q = 0; q < all.length; q++) {
+        var cc = all[q];
+        if (!cc || !validCode(cc.code)) { alert("Unknown card"); return; }
+        if (!isWild(cc.code)) {
+          if (seen2[cc.code]) { alert("Duplicate card " + cc.code); return; }
+          seen2[cc.code] = true;
+        }
+      }
       board = o.b;
       pool = o.p;
       selected = null;
@@ -554,5 +650,3 @@ function doImport() {
 </script>
 </body>
 </html>
-
-
