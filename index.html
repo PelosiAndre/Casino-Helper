@@ -565,8 +565,7 @@ function parseAnswer(str) {
         out.push("*" + nx);
         i += 2;
       } else {
-        out.push("**");
-        i += 1;
+        throw "bad wildcard in '" + str.slice(i) + "'";
       }
     } else if (str.substr(i, 2) === "10" && i + 2 < str.length && "SHDC*".indexOf(str[i + 2]) >= 0) {
       out.push("10" + str[i + 2]);
@@ -609,34 +608,86 @@ function applyAnswerCodes(codes) {
   document.getElementById("ioBox").style.display = "none";
   alert("Imported " + codes.length + " cards!");
 }
+function jsonBoardAnswer(b) {
+  var s = "";
+  for (var i = 0; i < b.length; i++) {
+    if (b[i]) s += b[i].code + "|";
+  }
+  return s;
+}
 function doImport() {
   var txt = document.getElementById("ioText").value.trim();
   var ans = document.getElementById("ioAnswer").value.trim();
-  if (txt.charAt(0) === "{") {
+  if (txt) {
+    var o = null;
     try {
-      var o = JSON.parse(txt);
-      if (!o.b || !o.p || o.b.length !== 52) { alert("Bad board"); return; }
-      var seen2 = {};
-      var all = o.b.concat(o.p);
-      for (var q = 0; q < all.length; q++) {
-        var cc = all[q];
-        if (!cc || !validCode(cc.code)) { alert("Unknown card"); return; }
-        if (!isWild(cc.code)) {
-          if (seen2[cc.code]) { alert("Duplicate card " + cc.code); return; }
-          seen2[cc.code] = true;
-        }
-      }
-      board = o.b;
-      pool = o.p;
-      selected = null;
-      saveHistory();
-      drawAll();
-      document.getElementById("ioBox").style.display = "none";
-      alert("Imported!");
+      o = JSON.parse(txt);
     } catch (e) {
-      alert("Bad JSON: " + e);
+      o = null;
     }
-    return;
+    if (o && o.b && o.p && o.b.length === 52 && o.p instanceof Array) {
+      var ok = true;
+      for (var v = 0; v < o.b.length; v++) {
+        var vb = o.b[v];
+        if (vb === null) continue;
+        if (!vb || !vb.code || !validCode(vb.code)) ok = false;
+      }
+      for (var w = 0; w < o.p.length; w++) {
+        var vp = o.p[w];
+        if (!vp || !vp.code || !validCode(vp.code)) ok = false;
+      }
+      if (ok) {
+        var useAnswer = false;
+        var ansCodes = null;
+        if (ans) {
+          try {
+            ansCodes = parseAnswer(ans);
+            var ja = jsonBoardAnswer(o.b);
+            var aa = "";
+            for (var a = 0; a < ansCodes.length; a++) aa += ansCodes[a] + "|";
+            if (aa !== ja) useAnswer = true;
+          } catch (e2) {
+            useAnswer = false;
+          }
+        }
+        if (!useAnswer) {
+          var seen2 = {};
+          var bad = null;
+          for (var q = 0; q < o.b.length; q++) {
+            var cb = o.b[q];
+            if (cb === null) continue;
+            if (!isWild(cb.code)) {
+              if (seen2[cb.code]) bad = "Duplicate card " + cb.code;
+              seen2[cb.code] = true;
+            }
+          }
+          for (var r = 0; r < o.p.length; r++) {
+            var cp = o.p[r];
+            if (!isWild(cp.code)) {
+              if (seen2[cp.code]) bad = "Duplicate card " + cp.code;
+              seen2[cp.code] = true;
+            }
+          }
+          if (bad) { alert(bad); return; }
+          for (var n = 0; n < o.b.length; n++) {
+            if (o.b[n] !== null && typeof o.b[n].locked !== "boolean") o.b[n].locked = false;
+          }
+          for (var m = 0; m < o.p.length; m++) {
+            if (typeof o.p[m].locked !== "boolean") o.p[m].locked = false;
+          }
+          board = o.b;
+          pool = o.p;
+          selected = null;
+          saveHistory();
+          drawAll();
+          document.getElementById("ioBox").style.display = "none";
+          alert("Imported!");
+          return;
+        }
+      } else {
+        if (!ans) { alert("Bad board"); return; }
+      }
+    }
   }
   var s = ans || txt;
   s = s.replace(/^answer\s*:/i, "");
